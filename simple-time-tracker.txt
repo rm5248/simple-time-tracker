@@ -1,0 +1,14 @@
+A simple time tracker.  Create an HTML page that will do the following:
+
+* Have a button to start a timer(granular to the minute).  By default, this should count down for 8 hours
+* have a button to pause the timer.  This should count down 30 minutes by default but can be extended for 5 minutes at a tim
+* have a button to unpause the timer
+* Display the timer expiration time as a wall-clock time(e.g. 4:35 pm)
+
+The intent behind this is to keep track of a work day with a lunch break that is 30 minutes by default.  the lunch break
+could be longer or shorter than 30 minutes.
+
+No server is needed.  The start/stop times should be stored in local storage on the browser so that a restart will
+ensure that the data is still valid and subject to the browser window staying open all the time.
+
+The buttons should be large enough to be easily clickable on a smart phone.

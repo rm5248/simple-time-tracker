@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple Time Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1d232b;
+    --muted: #6b7480;
+    --accent: #2563eb;
+    --pause: #d97706;
+    --ok: #16a34a;
+    --danger: #dc2626;
+    --border: #dde1e6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a;
+      --card: #1c2128;
+      --text: #e6e9ee;
+      --muted: #9aa3ae;
+      --accent: #3b82f6;
+      --pause: #f59e0b;
+      --ok: #22c55e;
+      --danger: #f87171;
+      --border: #2d343d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 16px; color: var(--muted); font-weight: 600; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .label { color: var(--muted); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .big { font-size: 3.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 6px 0; }
+  .mid { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; margin: 6px 0; }
+  .status { font-weight: 600; margin-top: 4px; }
+  .status.running { color: var(--ok); }
+  .status.paused { color: var(--pause); }
+  .status.done { color: var(--accent); }
+  .over { color: var(--danger); }
+  .buttons { display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button {
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 600;
+    min-height: 64px;
+    border: none;
+    border-radius: 14px;
+    color: #fff;
+    background: var(--accent);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:active { transform: scale(0.98); }
+  button.pause { background: var(--pause); }
+  button.resume { background: var(--ok); }
+  button.secondary { background: transparent; color: var(--text); border: 2px solid var(--border); }
+  button.danger { background: transparent; color: var(--danger); border: 2px solid var(--danger); }
+  [hidden] { display: none !important; }
+  .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; text-align: left; }
+  .settings label { font-size: 0.9rem; color: var(--muted); display: grid; gap: 4px; }
+  .settings input {
+    font: inherit; font-size: 1.1rem; padding: 10px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  .log { text-align: left; font-size: 0.95rem; color: var(--muted); margin: 0; padding-left: 20px; }
+  .log li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Simple Time Tracker</h1>
+
+  <section class="card">
+    <div class="label">Work day ends at</div>
+    <div class="big" id="endTime">--:--</div>
+    <div class="label" style="margin-top:12px">Work remaining</div>
+    <div class="mid" id="remaining">--:--</div>
+    <div class="status" id="status">Not started</div>
+  </section>
+
+  <section class="card" id="breakCard" hidden>
+    <div class="label">Lunch break ends at <span id="breakEnd">--:--</span></div>
+    <div class="mid" id="breakRemaining">--:--</div>
+  </section>
+
+  <section class="buttons">
+    <button id="startBtn">Start day</button>
+    <button id="pauseBtn" class="pause" hidden>Pause (lunch)</button>
+    <div class="row" id="pausedRow" hidden>
+      <button id="resumeBtn" class="resume">Resume</button>
+      <button id="extendBtn" class="secondary">+5 min</button>
+    </div>
+    <button id="resetBtn" class="danger" hidden>Reset</button>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="settings">
+      <label>Work day (hours)
+        <input id="workHours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal">
+      </label>
+      <label>Lunch (minutes)
+        <input id="lunchMins" type="number" min="5" max="240" step="5" inputmode="numeric">
+      </label>
+    </div>
+  </section>
+
+  <section class="card" id="logCard" hidden>
+    <div class="label" style="margin-bottom:8px">Today</div>
+    <ul class="log" id="log"></ul>
+  </section>
+</main>
+
+<script>
+(function () {
+  const KEY = 'simpleTimeTracker.v1';
+  const MIN = 60 * 1000;
+  const EXTEND_MS = 5 * MIN;
+
+  // State shape:
+  // { workMs, lunchMs, start: ts|null, breaks: [{ start, plannedMs, end: ts|null }] }
+  const defaults = { workMs: 8 * 60 * MIN, lunchMs: 30 * MIN, start: null, breaks: [] };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return Object.assign({}, defaults, JSON.parse(raw));
+    } catch (e) { /* storage unavailable or corrupt */ }
+    return Object.assign({}, defaults);
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  let state = load();
+  const $ = (id) => document.getElementById(id);
+
+  // Truncate to the whole minute so all times are minute-granular.
+  const floorMin = (t) => Math.floor(t / MIN) * MIN;
+
+  function currentBreak() {
+    const b = state.breaks[state.breaks.length - 1];
+    return b && b.end === null ? b : null;
+  }
+
+  function pausedMs(now) {
+    return state.breaks.reduce((sum, b) => sum + ((b.end ?? now) - b.start), 0);
+  }
+
+  // Projected end: start + work + time already spent on breaks. While on a
+  // break, assume it lasts at least its planned length.
+  function projectedEnd(now) {
+    let end = state.start + state.workMs + pausedMs(now);
+    const b = currentBreak();
+    if (b) end += Math.max(0, b.start + b.plannedMs - now);
+    return end;
+  }
+
+  function fmtClock(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function fmtDur(ms) {
+    const m = Math.floor(Math.abs(ms) / MIN);
+    return (ms < 0 ? '-' : '') + Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0');
+  }
+
+  // When a break's countdown runs out, resume work automatically. The break is
+  // closed at its planned end, so this is also correct after a page reload.
+  function autoResume(now) {
+    const b = currentBreak();
+    if (b && now >= b.start + b.plannedMs) {
+      b.end = b.start + b.plannedMs;
+      save();
+    }
+  }
+
+  function render() {
+    const now = Date.now();
+    autoResume(now);
+    const started = state.start !== null;
+    const b = currentBreak();
+
+    $('startBtn').hidden = started;
+    $('pauseBtn').hidden = !started || !!b;
+    $('pausedRow').hidden = !b;
+    $('resetBtn').hidden = !started;
+    $('breakCard').hidden = !b;
+
+    // Don't clobber a field the user is currently typing in.
+    if (document.activeElement !== $('workHours')) $('workHours').value = state.workMs / (60 * MIN);
+    if (document.activeElement !== $('lunchMins')) $('lunchMins').value = state.lunchMs / MIN;
+
+    const status = $('status');
+    if (!started) {
+      $('endTime').textContent = fmtClock(floorMin(now) + state.workMs);
+      $('remaining').textContent = fmtDur(state.workMs);
+      $('remaining').classList.remove('over');
+      status.textContent = 'Not started';
+      status.className = 'status';
+    } else {
+      const worked = now - state.start - pausedMs(now);
+      const remaining = state.workMs - worked;
+      $('endTime').textContent = fmtClock(projectedEnd(now));
+      // Round up so "0:01" shows until the final minute is fully elapsed.
+      $('remaining').textContent = fmtDur(remaining > 0 ? Math.ceil(remaining / MIN) * MIN : remaining);
+      $('remaining').classList.toggle('over', remaining < 0);
+      if (b) {
+        status.textContent = 'On break';
+        status.className = 'status paused';
+      } else if (remaining <= 0) {
+        status.textContent = 'Done for the day!';
+        status.className = 'status done';
+      } else {
+        status.textContent = 'Working';
+        status.className = 'status running';
+      }
+    }
+
+    if (b) {
+      const left = b.start + b.plannedMs - now;
+      $('breakEnd').textContent = fmtClock(b.start + b.plannedMs);
+      $('breakRemaining').textContent = fmtDur(Math.ceil(left / MIN) * MIN);
+    }
+
+    renderLog();
+    document.title = started ? fmtClock(projectedEnd(now)) + ' · Time Tracker' : 'Simple Time Tracker';
+  }
+
+  function renderLog() {
+    const log = $('log');
+    log.innerHTML = '';
+    if (state.start === null) { $('logCard').hidden = true; return; }
+    $('logCard').hidden = false;
+    const add = (text) => { const li = document.createElement('li'); li.textContent = text; log.appendChild(li); };
+    add('Started ' + fmtClock(state.start) + ' (' + fmtDur(Date.now() - state.start) + ' ago)');
+    state.breaks.forEach((b) => {
+      add(b.end === null
+        ? 'Break from ' + fmtClock(b.start) + ' (in progress)'
+        : 'Break ' + fmtClock(b.start) + ' – ' + fmtClock(b.end) + ' (' + fmtDur(b.end - b.start) + ')');
+    });
+  }
+
+  $('startBtn').addEventListener('click', () => {
+    state.start = floorMin(Date.now());
+    state.breaks = [];
+    save(); render();
+  });
+
+  $('pauseBtn').addEventListener('click', () => {
+    if (currentBreak()) return;
+    state.breaks.push({ start: floorMin(Date.now()), plannedMs: state.lunchMs, end: null });
+    save(); render();
+  });
+
+  $('extendBtn').addEventListener('click', () => {
+    const b = currentBreak();
+    if (!b) return;
+    b.plannedMs += EXTEND_MS;
+    save(); render();
+  });
+
+  $('resumeBtn').addEventListener('click', () => {
+    const b = currentBreak();
+    if (!b) return;
+    b.end = Math.max(b.start, floorMin(Date.now()));
+    save(); render();
+  });
+
+  $('resetBtn').addEventListener('click', () => {
+    if (!confirm('Reset the timer and clear today\'s data?')) return;
+    state.start = null;
+    state.breaks = [];
+    save(); render();
+  });
+
+  $('workHours').addEventListener('change', (e) => {
+    const h = parseFloat(e.target.value);
+    if (h > 0) { state.workMs = Math.round(h * 60) * MIN; save(); }
+    render();
+  });
+
+  $('lunchMins').addEventListener('change', (e) => {
+    const m = parseInt(e.target.value, 10);
+    if (m > 0) { state.lunchMs = m * MIN; save(); }
+    render();
+  });
+
+  // Keep multiple tabs in sync.
+  window.addEventListener('storage', (e) => { if (e.key === KEY) { state = load(); render(); } });
+
+  render();
+  setInterval(render, 1000);
+})();
+</script>
+</body>
+</html>
